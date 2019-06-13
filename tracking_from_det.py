@@ -208,46 +208,54 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
 
 
 
-    def matching_score_iou(self, dets_data) :
+    def matching_score_iou(self, dets_data, abandonned_track) :
         matching_scores = []
         #lost_track = []
-        if dets_data is not None:
-            for index in self._tracklets :
-                track = self._tracklets[index]
-                if track._valid :
-                    track_box = track._bounding_box  # left top right bottom
-                    for i in range(len(dets_data)) :
-                        int_type_det = int(dets_data[i][7])
-                        if int_type_det == track._object_type or \
-                                (int_type_det > 2 and track._object_type > 2) : # we track modality by modality
-                            det_box = [dets_data[i][2], dets_data[i][3],
-                                       dets_data[i][2] + dets_data[i][4],
-                                       dets_data[i][3] + dets_data[i][5]]
+
+        for index in abandonned_track :
+            track = self._tracklets[index]
+            if track._valid :
+                track_box = track._bounding_box  # left top right bottom
+                for i in dets_data :
+                        #if  # we track modality by modality
+                        det_box = self._tracklets[i]._bounding_box
                             # compute iou
-                            score = get_iou({'x1': track_box[0], 'y1': track_box[1], 'x2': track_box[2], 'y2': track_box[3]},
-                                            {'x1': det_box[0], 'y1': det_box[1], 'x2': det_box[2], 'y2': det_box[3]})
-                        else :
-                            score = 0.0
+                        score = get_iou({'x1': track_box[0], 'y1': track_box[1], 'x2': track_box[2], 'y2': track_box[3]},
+                                        {'x1': det_box[0], 'y1': det_box[1], 'x2': det_box[2], 'y2': det_box[3]})
+                        #else :
+                            #score = 0.0
                         if score > self._threshold_iou :
                             matching_scores.append(
                                 (index, i, score))  # identity of track, id of det in the list of dets, score
 
         return matching_scores
 
-    '''def extract_reid_feature_dets(self, dets_data, image):
+    def extract_reid_feature_dets(self, dets_data, image,frame_id):
         if dets_data is not None:
             bdb_dets = []
+            index_added_to_tracker = []
             for i in range(len(dets_data)):
-                int_type_det = int(dets_data[i][7])
-                if int_type_det == track._object_type or \
-                        (int_type_det > 2 and track._object_type > 2):  # we track modality by modality
-                    det_box = [dets_data[i][2], dets_data[i][3],
-                               dets_data[i][2] + dets_data[i][4],
-                               dets_data[i][3] + dets_data[i][5]]
-                    bdb_dets.append(det_box)
-            features = extract_reid_features(self.reid_model, image, bdb_dets)  # dung CNN de extract cls_feature to
-            features = features.cpu().numpy()'''
+                new_det = dets_data[i]
+                new_track = Tracklet(item=new_det, det_or_ref='det', frame_id=frame_id, tracker=self)
+                # check if we need a new id
+                # if new_track.ready_for_new_id() :
+                #    new_track.assign_valid_id(tracker=self)
+                if len(self._tracklets) == 0:
+                    next_index = 0
+                else:
+                    next_index = max(self._tracklets.keys()) + 1
+                self._tracklets[next_index] = new_track
+                index_added_to_tracker.append(next_index)
 
+                # feature reid
+                bdb_dets.append(new_track._bounding_box)
+                # set feature Re_ID
+            features = extract_reid_features(self.reid_model, image, bdb_dets)  # dung CNN de extract cls_feature to
+            features = features.cpu().numpy()
+            for i in range(len(features)):
+                tracklet = self._tracklets[index_added_to_tracker[i]]
+                tracklet.set_feature(features[i])
+        return index_added_to_tracker
 
     def extract_reid_feature(self, set_of_bdb_index, image):
         bdb_tracks =[self._tracklets[id]._bounding_box for id in set_of_bdb_index]
@@ -263,7 +271,7 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
 
 
 
-    def refine_matching_score(self, matching_scores, dets_data) :
+    def refine_matching_score(self, matching_scores, dets_data, match) :
         new_matching_scores = []
         abandonned_tracks = []
         new_dets = []
@@ -279,9 +287,14 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
         for index in self._tracklets :
             if index not in accepted_tracks:
                 abandonned_tracks.append(index)
-        for i in range(len(dets_data)) :
+
+        for i, index in enumerate(dets_data) :
             if i not in scores_by_det :
-                new_dets.append(i)
+                new_dets.append(index)
+
+        for m in match:
+            abandonned_tracks.remove(m[0])
+            new_dets.remove(m[1])
 
         return new_matching_scores, abandonned_tracks, new_dets
 
@@ -325,19 +338,6 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
             #if self._tracklets[m[0]].ready_for_new_id() :
             #    self._tracklets[m[0]].assign_valid_id(tracker=self)
 
-    def update_tracks_non_reid(self, dets_data, matching_scores, frame_id):
-        for m in matching_scores:
-            new_bounding_box = np.array([dets_data[m[1]][2], dets_data[m[1]][3],
-                                         dets_data[m[1]][2] + dets_data[m[1]][4],
-                                         dets_data[m[1]][3] + dets_data[m[1]][5]])
-            new_bounding_box = 0.5 * self._tracklets[m[0]]._bounding_box + 0.5 * new_bounding_box
-            self._tracklets[m[0]]._bounding_box = new_bounding_box
-            self._tracklets[m[0]]._old_frame_updated = frame_id
-            self._tracklets[m[0]]._additional_det_info = additional_info(dets_data[m[1]])
-            self._tracklets[m[0]]._count_frames += 1
-            # check if we need a new id
-            if self._tracklets[m[0]].ready_for_new_id():
-                self._tracklets[m[0]].assign_valid_id(tracker=self)
     def remove_abandonned_tracks(self, abandonned_tracks) :
         # first, count the number of tracks without id that will be removed
         removed_tracks_noid = [self._tracklets[index] for index in abandonned_tracks
@@ -345,20 +345,6 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
         self._number_tracks_noid += len(removed_tracks_noid)
         for id in abandonned_tracks :
             self._tracklets.pop(id)
-
-    def add_new_tracks_for_first_frame(self,dets_data, new_dets, frame_id):
-        self._current_boxes_baseline.clear()
-        for i in new_dets:
-            new_det = dets_data[i]
-            new_track = Tracklet(item=new_det, det_or_ref='det', frame_id=frame_id, tracker=self)
-            # check if we need a new id
-            if new_track.ready_for_new_id() :
-                new_track.assign_valid_id(tracker=self)
-            if len(self._tracklets) == 0:
-                next_index = 0
-            else:
-                next_index = max(self._tracklets.keys()) + 1
-            self._tracklets[next_index] = new_track
 
     def add_new_tracks(self, dets_data, new_dets, frame_id, image) :
 
@@ -387,29 +373,43 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
             tracklet = self._tracklets[index_added_to_tracker[i]]
             tracklet.set_feature(features[i])
         return index_added_to_tracker
-    # ===========================================================================
-    def matching_reid_backup(self, ids_tracks_to_matching_reid):
-        tracklets_reid_feature = {}
-        for index in self._tracklets:
-            #if self._tracklets[index]._id > 0:
-            track = self._tracklets[index]
-            tracklets_reid_feature[index] = track
+
+        # -----------------------------------------------------------------------------------------------------
+    def matching_reid(self, dets_data):
 
         matches = []
+        existing_tracks =[]
+        index_track = []
+        for index in self._tracklets:
+            if index not in dets_data:
+                track = self._tracklets[index]
+                existing_tracks.append(track)
+                index_track.append(index)
+        dists = nearest_reid_distance(existing_tracks, refind_tracks=[self._tracklets[id] for id in dets_data],metric='euclidean')
 
-        for m in ids_tracks_to_matching_reid:
-            refind_reid_feature = []
-            if self._tracklets[m]._id < 0:
-                refind_reid_feature.append(self._tracklets[m])
-                dists = nearest_reid_distance(tracklets_reid_feature, refind_reid_feature, metric='euclidean')
-                matche = np.unravel_index(np.argmin(dists, axis=None), dists.shape)
-                matche = list(matche)
-                matches.append(matche)
-                #dists = gate_cost_matrix(self.kalman_filter, dists, self._tracklets[m[0]], refind_reid_feature)
-                #matches, u_track, u_detection = linear_assignment(dists, thresh=self.min_ap_dist)
+        if dists.shape[0] * dists.shape[1] > 0:
+            dists_argmin = np.argmin(dists, axis=1)
+            dists_min = [dists[i, dists_argmin[i]] for i in range(len(dists_argmin))]
+            for i in range(len(dists_argmin)):
+                if dists_min[i] < 0.24:
+                    matches.append(
+                        [index_track[i], dets_data[dists_argmin[i]], dists_min[i]])
+
+                # matche = list(matche)
+                # matches.append(match)
+                # for i in range(len(dists)) :
+                '''j = int(dists[i][0])
+                matches.append([set_of_abandonned_index[i], set_of_negative_index[j]])
+                    #dists = gate_cost_matrix(self.kalman_filter, dists, self._tracklets[m[0]], refind_reid_feature)
+                    #matches, u_track, u_detection = linear_assignment(dists, thresh=self.min_ap_dist)'''
+
         return matches
+
+
+
+        # --------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------
-    def matching_reid(self, set_of_negative_index=[], set_of_abandonned_index=[]):
+    def matching_reid_back_up(self, set_of_negative_index=[], set_of_abandonned_index=[]):
 
         matches = []
         dists = nearest_reid_distance(existing_tracks=[self._tracklets[id] for id in set_of_abandonned_index],
@@ -433,7 +433,7 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
         return matches
 
     # --------------------------------------------------------------------------------------
-    def refine_matching_reid(self, matches) :
+    def refine_matching_reid(self, matches, dets_data) :
         new_matching_reid = []
         abandonned_tracks = []
         new_dets = []
@@ -448,21 +448,24 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
             new_matching_reid.append(dists_between_tracks[i])
             accepted_tracks.append(dists_between_tracks[i][0])
             accepted_new_dets.append(dists_between_tracks[i][1])
-        for m in matches :
-            if m[0] not in accepted_tracks:
-                abandonned_tracks.append(m[0])
-            elif m[1] not in accepted_new_dets:
-                new_dets.append(m[1])
-
+        for index in self._tracklets :
+            if index not in accepted_tracks:
+                abandonned_tracks.append(index)
+        for index in dets_data:
+            if index not in dists_between_tracks:
+                new_dets.append(index)
         return new_matching_reid, abandonned_tracks, new_dets
 
 
-    def merge_tracks_reid(self, match, frame_id, image):
+    def merge_tracks_reid(self, match, frame_id):
         #bdb_tracks = []
         for m in match:
 
             new_box = self._tracklets[m[1]]._bounding_box
-            self._tracklets[m[0]]._bounding_box = new_box
+            try:
+                self._tracklets[m[0]]._bounding_box = new_box
+            except:
+                print('stop')
             self._tracklets[m[0]]._old_frame_updated = frame_id
             self._tracklets[m[0]]._count_frames += self._tracklets[m[1]]._count_frames
             self._tracklets[m[0]]._reid_feature = self._tracklets[m[1]]._reid_feature
@@ -487,7 +490,10 @@ class Tracker_from_det(Tracker_from_ref_annotation) :
             if index_new_id is None or index in index_new_id :
                 if self._tracklets[index].ready_for_new_id():
                     self._tracklets[index].assign_valid_id(tracker=self)
-
+    '''def ready_for_new_id(self, new_dets):
+        for index in new_dets :
+            if self._tracklets[index].ready_for_new_id():
+                self._tracklets[index].assign_valid_id(tracker=self)'''
 
 
 

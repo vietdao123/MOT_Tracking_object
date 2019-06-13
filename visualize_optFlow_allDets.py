@@ -16,7 +16,6 @@ if profiling :
 #frames_dir = '//10.126.40.37/jafar/Khanh/netdef_models/FlowNet3/image_test/levi_extr.mp4'
 #frames_dir = '//10.126.40.35/jafar/Khanh/image_test/levi_extr_r2.mp4'
 frames_dir = './data/frames/20190325_172557.mp4'
-print('NGU Nhu bo')
 first_frame = 0
 #re_det = 5
 re_det = 1
@@ -27,7 +26,7 @@ show = True
 save = 'image' # 'image' or 'video'
 save_ratio = 1.0
 save_to_txt = True
-threshold_iou = 1.0
+threshold_iou = 0.25
 threshold_on_standby_frames = 25
 #threshold_on_standby_frames_to_view = threshold_on_standby_frames
 threshold_on_standby_frames_to_view = re_det + 3
@@ -199,7 +198,7 @@ if __name__ == '__main__' :
         if profiling :
             pr = cProfile.Profile()
         for frame_id in range(min_frame, max_frame) :
-            if frame_id == 57:
+            if frame_id == 88:
                 print('stop')
             if frame_id in dict_data :
                 array_r_data = dict_data[frame_id]
@@ -248,31 +247,47 @@ if __name__ == '__main__' :
                     if array_r_data is not None :
                         # use detected boxes to update the tracking
                         time_start = time.clock()
-                        matches = tracker.matching_score_iou(array_r_data)
+                        tracker.extract_reid_feature(tracker._tracklets, image)
+                        detections = tracker.extract_reid_feature_dets(array_r_data, image,frame_id)
+
+                        match = tracker.matching_reid(detections)
+                        match, abandonned_track, new_det = tracker.refine_matching_reid(match, detections)
+
+                        for index in detections:
+                            abandonned_track.remove(index)
+                        # for m in match:
+                        # index_new.remove(m[1])
+                        tracker.merge_tracks_reid(match, frame_id)
+
+
+
+                        matches = tracker.matching_score_iou(new_det, abandonned_track)
                         #matche = tracker.matching_reid(matches)
                         matches, abandonned_tracks, new_dets = \
-                            tracker.refine_matching_score(matches, array_r_data)
-                        tracker.update_tracks(array_r_data, matches, frame_id, image)
-                        index_new = tracker.add_new_tracks(array_r_data, new_dets, frame_id, image)
+                            tracker.refine_matching_score(matches, detections, match)
+                        #tracker.update_tracks(array_r_data, matches, frame_id, image)
+                        tracker.merge_tracks_reid(matches, frame_id)
+                        #index_new = tracker.add_new_tracks(array_r_data, new_dets, frame_id, image)
                         #TODO : extrack feature cua hai cai update +NEW TRACK
                         #tracker.extract_reid_feature(image)
 
 
                         #if len(abandonned_tracks)> 0:
-                        set_of_abandonned_index = []
+                        #set_of_abandonned_index = []
                         #set_of_negative_index = [index for index in tracker._tracklets if
                          #                        tracker._tracklets[index]._id < 0]
-                        set_of_abandonned_index = abandonned_tracks
+                        #set_of_abandonned_index = abandonned_tracks
                         #set_of_abandonned_index = [m[0] for m in matches]
                         #tracker.extract_reid_feature(set_of_abandonned_index, image)
-                        match = tracker.matching_reid(index_new, set_of_abandonned_index)
-                        match, abandonned_track, new_det = tracker.refine_matching_reid(match)
+                        #match = tracker.matching_reid(index_new, set_of_abandonned_index)
+                        #match, abandonned_track, new_det = tracker.refine_matching_reid(match)
                         #for m in match:
                             #index_new.remove(m[1])
-                        tracker.merge_tracks_reid(match, frame_id, image)
+                        #tracker.merge_tracks_reid(match, frame_id, image)
 
-                        #elif len(abandonned_tracks)==0:
+
                         tracker.ready_for_new_id(None)
+                        #tracker.ready_for_new_id(new_dets)
                         time_elapsed = time.clock() - time_start
                         time_elapsed *= 1000
                         computing_time['matching']['total'] += time_elapsed
