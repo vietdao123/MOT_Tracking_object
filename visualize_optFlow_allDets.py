@@ -16,7 +16,7 @@ if profiling :
 #frames_dir = '//10.126.40.37/jafar/Khanh/netdef_models/FlowNet3/image_test/levi_extr.mp4'
 #frames_dir = '//10.126.40.35/jafar/Khanh/image_test/levi_extr_r2.mp4'
 frames_dir = './data/frames/20190325_172557.mp4'
-
+print('NGU Nhu bo')
 first_frame = 0
 #re_det = 5
 re_det = 1
